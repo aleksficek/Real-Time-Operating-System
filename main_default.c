@@ -54,17 +54,21 @@ void PendSV_Handler(void) {
 	// Just push/pop R4-R11 to/from stack and manipulate the stack pointer
 	
 	
-	// This 
+																																																			// LOTS OF QUESTIONS HERE, CLARIFY
 	TCBS[current_task].stack_pointer = (uint32_t *)storeContext(); // Returns value of stack pointer
 	
 	restoreContext((uint32_t)TCBS[next_task].stack_pointer);
 }
 
 //Function pointer to create task function
-typedef void(*rtosTaskFunc_t)(void *args, uint8_t priority);
+typedef void(*rtosTaskFunc_t)(void *args);
 
-void task_create(void *R0, uint8_t priority_)
+void task_create(rtosTaskFunc_t taskFunction, void *R0, uint8_t priority_)
 {
+	//Protects against more than 6 tasks being created
+	if (numTasks > 5)
+		return;
+	
 	//Set priority in tcb_t array
 	TCBS[numTasks].priority = priority_;
 	
@@ -96,10 +100,18 @@ void task_create(void *R0, uint8_t priority_)
 
     (*currNode).next = newNode;
   }
+	
+	//Initialize TCB members
+	TCBS[numTasks].stack_pointer = TCBS[numTasks].base - 15;
+	
+	//Setting R0
+	*(TCBS[numTasks].base - 7) = (uint32_t)R0;
+	//Setting task function address
+	*(TCBS[numTasks].base - 1) = (uint32_t)(*taskFunction);
+	//Setting P0 to default value of 0x01000000 as specified in manual
+	*(TCBS[numTasks].base) = (uint32_t)(0x01000000);
 
   numTasks++;
-	
-									//DO R0 STUFF
 }
 
 void initialization(void) {
@@ -118,6 +130,10 @@ void initialization(void) {
 	TCBS[0].base = (uint32_t *)(mainstack_address - 0x2800);
 	
 	numTasks = 0;
+	
+	//Initialize schedule array to all point to NULL. Will be populated by task create function.
+	for (int i=0; i<6; i++)
+		schedule_array[i] = NULL;
 	
 	// Copy the main stack contents to process stack of new main() task and set the MSP to the main stack base address
 	// Loop through each item and then save to next stack from mainstack_address - 0x8000
