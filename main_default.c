@@ -35,7 +35,12 @@ Node_t *schedule_array[6];
 uint32_t msTicks = 0;
 
 void SysTick_Handler(void) {
-    msTicks++;
+	// When context switch required
+	if (!(msTicks % 1000)) {
+		// Write 1 to PENDSVSET bit of ICSR
+		SCB->ICSR |= (1 << 28);
+	}
+	msTicks++;
 }
 
 uint32_t storeContext(void);
@@ -46,11 +51,14 @@ void add_node(uint8_t priority_, uint8_t taskNum);
 
 void PendSV_Handler(void) {
 	
+	printf("\nPENDSV\n");								
+	
 	//Puts current tasks' node back
 	add_node(TCBS[currTask].priority, currTask);
 	
 	//Finds next task
 	uint8_t next_task = find_next_task();
+	printf("Next Task: %d\n", next_task);
 	
 	
 							// Some way of choosing next Task			
@@ -58,6 +66,10 @@ void PendSV_Handler(void) {
 							// Access Registers 4 to 11 and push onto TCB1s stack
 	
 	// Just push/pop R4-R11 to/from stack and manipulate the stack pointer
+	
+	/*=======================================================
+								THIS IS WHERE IT BROKE
+	=======================================================*/
 	
 	//Pushes register contents onto current task's stack and updates its stack pointer																																												// LOTS OF QUESTIONS HERE, CLARIFY
 	TCBS[currTask].stack_pointer = (uint32_t *)storeContext();
@@ -185,12 +197,12 @@ void initialization(void) {
 	//This used to remember where main stack base is
 	uint32_t *mainstack_base = *mainstack;
 	
-	TCBS[5].base = (uint32_t *)(mainstack_address - 0x0800);
-	TCBS[4].base = (uint32_t *)(mainstack_address - 0x1200);
-	TCBS[3].base = (uint32_t *)(mainstack_address - 0x1600);
-	TCBS[2].base = (uint32_t *)(mainstack_address - 0x2000);
-	TCBS[1].base = (uint32_t *)(mainstack_address - 0x2400);
-	TCBS[0].base = (uint32_t *)(mainstack_address - 0x2800);
+	TCBS[5].base = (uint32_t *)(mainstack_address - 0x0800/4);
+	TCBS[4].base = (uint32_t *)(mainstack_address - 0x1200/4);
+	TCBS[3].base = (uint32_t *)(mainstack_address - 0x1600/4);
+	TCBS[2].base = (uint32_t *)(mainstack_address - 0x2000/4);
+	TCBS[1].base = (uint32_t *)(mainstack_address - 0x2400/4);
+	TCBS[0].base = (uint32_t *)(mainstack_address - 0x2800/4);
 	
 	numTasks = 0;
 	
@@ -208,7 +220,9 @@ void initialization(void) {
 	while (mainstack_address >= MSP) {
 		*TCBS[0].current = *mainstack_address;
 		TCBS[0].current--;
+		
 		mainstack_address--;
+		
 	}
 	
 	TCBS[0].stack_pointer = TCBS[0].current + 1;
@@ -226,19 +240,54 @@ void initialization(void) {
 	//Begin multithread by running task 0. Correct next task will be 
 	//determined at next pre-empt in PendSV_Handler
 	currTask = 0;
+	
+	//Set task 1 priority to 0, acts as idle task
+	TCBS[0].priority = 0;
+	add_node(TCBS[0].priority, numTasks);
+	
+	//Increment numtasks now that there is a task
+	numTasks++;
+}
+
+
+void do_something(void *args) {
+	while (1)
+	{
+		for (int priority = 0; priority<6; priority++)
+		{
+			Node_t *currNode = schedule_array[priority];
+
+			printf("Priority list %d:", priority);
+
+			while (currNode != NULL)
+			{
+				printf("%d ", (*currNode).task_num);
+				currNode = (*currNode).next;
+			}
+
+			printf("\n");
+		}
+		printf("\n");
+	}
 }
 
 
 int main(void) {
+	initialization();
+	
+	rtosTaskFunc_t task1 = &do_something;
+	task_create(task1, NULL, 5);
  
 	SysTick_Config(SystemCoreClock/1000);
 	printf("\nStarting...\n\n");
 	
 	uint32_t period = 1000; // 1s
 	uint32_t prev = -period;
+	
 	while(true) {
 		if((uint32_t)(msTicks - prev) >= period) {
-			printf("tick ");
+			printf("PSP: %d\n", __get_PSP());
+			printf("MSP: %d\n\n", __get_MSP());
 			prev += period;
 		}
 	}
