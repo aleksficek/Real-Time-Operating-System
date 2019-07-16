@@ -24,6 +24,7 @@ typedef struct{
 tcb_t TCBS[6];
 uint8_t numTasks;
 uint8_t currTask;
+uint8_t next_task;
 
 typedef struct Node_t{
 	uint8_t task_num;
@@ -50,16 +51,31 @@ uint8_t remove_front_node(uint8_t priority);
 void add_node(uint8_t priority_, uint8_t taskNum);
 
 void PendSV_Handler(void) {
+	printf("\n\nPENDSV\n");								
 	
-	printf("\nPENDSV\n");								
-	
-	//Puts current tasks' node back
+	printf("LETS PRINT CURRTASK PRIORITY: %d\n", TCBS[currTask].priority);
+	//Puts current task's node back
 	add_node(TCBS[currTask].priority, currTask);
 	
-	//Finds next task
-	uint8_t next_task = find_next_task();
-	printf("Next Task: %d\n", next_task);
+	for (int priority = 0; priority<6; priority++)
+		{
+			Node_t *currNode = schedule_array[priority];
+
+			printf("Priority list %d:", priority);
+
+			while (currNode != NULL)
+			{
+				printf("%d ", (*currNode).task_num);
+				currNode = (*currNode).next;
+			}
+
+			printf("\n");
+		}
 	
+	
+	//Finds next task
+	next_task = find_next_task();
+	printf("Next Task: %d\n", next_task);
 	
 							// Some way of choosing next Task			
 							// Assume we start we TCB0
@@ -67,12 +83,9 @@ void PendSV_Handler(void) {
 	
 	// Just push/pop R4-R11 to/from stack and manipulate the stack pointer
 	
-	/*=======================================================
-								THIS IS WHERE IT BROKE
-	=======================================================*/
-	
 	//Pushes register contents onto current task's stack and updates its stack pointer																																												// LOTS OF QUESTIONS HERE, CLARIFY
 	TCBS[currTask].stack_pointer = (uint32_t *)storeContext();
+
 	//Pops new task's registers content (stored on its stack) into registers
 	restoreContext((uint32_t)TCBS[next_task].stack_pointer);
 	
@@ -81,6 +94,10 @@ void PendSV_Handler(void) {
 
 	//Removes next task's node
 	remove_front_node(TCBS[next_task].priority);
+	
+	//Reset PENDSVSET bit of ICSR to 0
+	
+	SCB->ICSR &= !(1 << 28);
 }
 
 //Function pointer to create task function
@@ -89,9 +106,7 @@ typedef void(*rtosTaskFunc_t)(void *args);
 //Gets called in taks initialization and pre-emting
 void add_node(uint8_t priority_, uint8_t taskNum)
 {
-	//Set priority in tcb_t array
-	TCBS[numTasks].priority = priority_;
-	
+	printf("Print the task Num: %d\n", taskNum);
 	//Iterate down linked list
 	Node_t* currNode = schedule_array[priority_];
 
@@ -100,6 +115,7 @@ void add_node(uint8_t priority_, uint8_t taskNum)
 	{
     Node_t* newNode = (Node_t*)malloc(sizeof(Node_t));
     (*newNode).task_num = taskNum;
+		printf("NEW NODE ADDED TASK NUM: %d\n", (*newNode).task_num);
     (*newNode).next = NULL;
 
 		schedule_array[priority_] = newNode;
@@ -132,6 +148,7 @@ void task_create(rtosTaskFunc_t taskFunction, void *R0, uint8_t priority_)
 	
 	//Initialize TCB members
 	TCBS[numTasks].stack_pointer = TCBS[numTasks].base - 15;
+	TCBS[numTasks].priority = priority_;
 	
 	//Setting R0
 	*(TCBS[numTasks].base - 7) = (uint32_t)R0;
@@ -177,7 +194,10 @@ uint8_t find_next_task()
   
   //If no available next task
   if (next_priority == -1)
+	{
+		printf("No available next task, ERROR");
     return -1;
+	}
 
   //If available next task, return first task num of linked list.
   //Because available tasks are added at back of linked list
@@ -253,6 +273,7 @@ void initialization(void) {
 void do_something(void *args) {
 	while (1)
 	{
+		printf("\n\nTHIS IS TASK 2\n\n");
 		for (int priority = 0; priority<6; priority++)
 		{
 			Node_t *currNode = schedule_array[priority];
@@ -273,23 +294,29 @@ void do_something(void *args) {
 
 
 int main(void) {
+	printf("\n=============================Starting...===================================\n\n");
+	//Initialization creates task 0
 	initialization();
 	
 	rtosTaskFunc_t task1 = &do_something;
 	task_create(task1, NULL, 5);
  
 	SysTick_Config(SystemCoreClock/1000);
-	printf("\nStarting...\n\n");
+	
+	printf("Curr task after init: %d", currTask);
 	
 	uint32_t period = 1000; // 1s
 	uint32_t prev = -period;
 	
 	while(true) {
 		if((uint32_t)(msTicks - prev) >= period) {
+			printf("\n\nTHIS IS TASK 1\n\n");
 			printf("PSP: %d\n", __get_PSP());
 			printf("MSP: %d\n\n", __get_MSP());
 			prev += period;
 		}
+		
+		printf("task0\n");
 	}
 		
 }
