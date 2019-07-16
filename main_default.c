@@ -51,31 +51,12 @@ uint8_t remove_front_node(uint8_t priority);
 void add_node(uint8_t priority_, uint8_t taskNum);
 
 void PendSV_Handler(void) {
-	printf("\n\nPENDSV\n");								
-	
-	printf("LETS PRINT CURRTASK PRIORITY: %d\n", TCBS[currTask].priority);
+	printf("\n\n=============PENDSV===============\n\n");								
 	//Puts current task's node back
 	add_node(TCBS[currTask].priority, currTask);
-	
-	for (int priority = 0; priority<6; priority++)
-		{
-			Node_t *currNode = schedule_array[priority];
 
-			printf("Priority list %d:", priority);
-
-			while (currNode != NULL)
-			{
-				printf("%d ", (*currNode).task_num);
-				currNode = (*currNode).next;
-			}
-
-			printf("\n");
-		}
-	
-	
 	//Finds next task
 	next_task = find_next_task();
-	printf("Next Task: %d\n", next_task);
 	
 							// Some way of choosing next Task			
 							// Assume we start we TCB0
@@ -106,7 +87,6 @@ typedef void(*rtosTaskFunc_t)(void *args);
 //Gets called in taks initialization and pre-emting
 void add_node(uint8_t priority_, uint8_t taskNum)
 {
-	printf("Print the task Num: %d\n", taskNum);
 	//Iterate down linked list
 	Node_t* currNode = schedule_array[priority_];
 
@@ -115,7 +95,6 @@ void add_node(uint8_t priority_, uint8_t taskNum)
 	{
     Node_t* newNode = (Node_t*)malloc(sizeof(Node_t));
     (*newNode).task_num = taskNum;
-		printf("NEW NODE ADDED TASK NUM: %d\n", (*newNode).task_num);
     (*newNode).next = NULL;
 
 		schedule_array[priority_] = newNode;
@@ -145,7 +124,7 @@ void task_create(rtosTaskFunc_t taskFunction, void *R0, uint8_t priority_)
 		return;
 	
 	add_node(priority_, numTasks);
-	
+		
 	//Initialize TCB members
 	TCBS[numTasks].stack_pointer = TCBS[numTasks].base - 15;
 	TCBS[numTasks].priority = priority_;
@@ -263,7 +242,6 @@ void initialization(void) {
 	
 	//Set task 1 priority to 0, acts as idle task
 	TCBS[0].priority = 0;
-	add_node(TCBS[0].priority, numTasks);
 	
 	//Increment numtasks now that there is a task
 	numTasks++;
@@ -273,7 +251,7 @@ void initialization(void) {
 void do_something(void *args) {
 	while (1)
 	{
-		printf("\n\nTHIS IS TASK 2\n\n");
+		printf("\n\nTHIS IS TASK 1\n\n");
 		for (int priority = 0; priority<6; priority++)
 		{
 			Node_t *currNode = schedule_array[priority];
@@ -292,6 +270,66 @@ void do_something(void *args) {
 	}
 }
 
+void second_task(void *args) {
+	while (1)
+	{
+		printf("\n\nTHIS IS TASK 2\n\n");
+		for (int priority = 0; priority<6; priority++)
+		{
+			Node_t *currNode = schedule_array[priority];
+
+			printf("Priority list %d:", priority);
+			while (currNode != NULL)
+			{
+				printf("%d ", (*currNode).task_num);
+				currNode = (*currNode).next;
+			}
+			printf("\n");
+		}
+		printf("\n");
+	}
+}
+
+void third_task(void *args) {
+	while (1)
+	{
+		printf("\n\nTHIS IS TASK 3\n\n");
+		for (int priority = 0; priority<6; priority++)
+		{
+			Node_t *currNode = schedule_array[priority];
+
+			printf("Priority list %d:", priority);
+			while (currNode != NULL)
+			{
+				printf("%d ", (*currNode).task_num);
+				currNode = (*currNode).next;
+			}
+			printf("\n");
+		}
+		printf("\n");
+	}
+}
+
+void fourth_task(void *args) {
+	while (1)
+	{
+		printf("\n\nTHIS IS TASK 4\n\n");
+		for (int priority = 0; priority<6; priority++)
+		{
+			Node_t *currNode = schedule_array[priority];
+
+			printf("Priority list %d:", priority);
+			while (currNode != NULL)
+			{
+				printf("%d ", (*currNode).task_num);
+				currNode = (*currNode).next;
+			}
+			printf("\n");
+		}
+		printf("\n");
+	}
+}
+
 
 int main(void) {
 	printf("\n=============================Starting...===================================\n\n");
@@ -299,24 +337,43 @@ int main(void) {
 	initialization();
 	
 	rtosTaskFunc_t task1 = &do_something;
-	task_create(task1, NULL, 5);
+	task_create(task1, NULL, 0);
+	rtosTaskFunc_t task2 = &second_task;
+	task_create(task2, NULL, 0);
+	rtosTaskFunc_t task3 = &third_task;
+	task_create(task2, NULL, 0);
+	rtosTaskFunc_t task4 = &fourth_task;
+	task_create(task2, NULL, 0);
  
 	SysTick_Config(SystemCoreClock/1000);
-	
-	printf("Curr task after init: %d", currTask);
 	
 	uint32_t period = 1000; // 1s
 	uint32_t prev = -period;
 	
 	while(true) {
+		/*
 		if((uint32_t)(msTicks - prev) >= period) {
-			printf("\n\nTHIS IS TASK 1\n\n");
-			printf("PSP: %d\n", __get_PSP());
-			printf("MSP: %d\n\n", __get_MSP());
+			printf("\nTASK 0\n");
 			prev += period;
 		}
+		*/
 		
-		printf("task0\n");
+		printf("\n\nTHIS IS TASK 0\n\n");
+		for (int priority = 0; priority<6; priority++)
+		{
+			Node_t *currNode = schedule_array[priority];
+
+			printf("Priority list %d:", priority);
+
+			while (currNode != NULL)
+			{
+				printf("%d ", (*currNode).task_num);
+				currNode = (*currNode).next;
+			}
+
+			printf("\n");
+		}
+		printf("\n");
 	}
 		
 }
