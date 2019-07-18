@@ -76,7 +76,8 @@ void wait(sem_t *s) {
 	{
 		//Blocks that task because it is trying to access an unavailable semaphore
 		TCBS[currTask].status = task_blocked_semaphore;
-		//Removes that node from bit vector
+		printf("==============================Currently on: <%d>", currTask);
+		
 				for (int priority = 0; priority<6; priority++)
 		{
 			Node_t *currNode = schedule_array[priority];
@@ -91,8 +92,12 @@ void wait(sem_t *s) {
 
 			printf("\n");
 		}
-		uint8_t nodeRemoved = remove_front_node(TCBS[currTask].priority);
-		printf("==============================I HAVE REMOVED NODE: <%d> FROM BIT VECTOR", nodeRemoved);
+		
+		printf("==============================WE OUT HERE LETS GO");
+		//Removes that node from bit vector
+		// ERROR WITH THIS ================ you are removing node currTask, but currTask doesnt exist in bit vector yet
+		// uint8_t nodeRemoved = remove_front_node(TCBS[currTask].priority);
+		// printf("==============================I HAVE REMOVED NODE: <%d> FROM BIT VECTOR", nodeRemoved);
 		//Iterates down wait list and adds new node
 		Node_t *currNode;
 
