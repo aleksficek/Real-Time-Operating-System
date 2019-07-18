@@ -8,36 +8,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// Semaphore Implementation
-typedef uint32_t sem_t;
-
-void init(sem_t *s, uint32_t count) {
-	*s = count;
-}
-void wait(sem_t *s) {
-	__disable_irq();
-	while(*s <= 0) {
-		__enable_irq();
-		__disable_irq();
-	}
-	(*s)--;
-	__enable_irq();
-}
-void signal(sem_t *s) {
-	__disable_irq();
-	(*s)++;
-	__enable_irq();
-}
-
-sem_t lock;
-
-//Timeslice frequency Hz
+//Timeslice frequency Hz, CURRENTLY UNUSED
 const int timeslice_frequency = 1;
 
 // Define task status macros
 typedef uint8_t task_status;
-#define task_ready		1
-#define task_blocked	0
+#define task_ready							1
+#define task_blocked						0
+#define task_blocked_semaphore	2//Need this to tell scheduler to disregard variables which keep track of how long delay is
 
 //Function declarations
 uint32_t storeContext(void);
@@ -45,6 +23,18 @@ void restoreContext(uint32_t sp);
 uint8_t find_next_task();
 uint8_t remove_front_node(uint8_t priority);
 void add_node(uint8_t priority_, uint8_t taskNum);
+
+typedef struct Node_t{
+	uint8_t task_num;
+	struct Node_t *next;
+}Node_t;
+
+// Semaphore Implementation
+typedef struct{
+	uint32_t count;
+	//Wait list
+	Node_t *head;
+}sem_t;
 
 // Declare TCB 
 typedef struct{
@@ -72,6 +62,113 @@ uint8_t numTasks;
 uint8_t currTask;
 uint8_t next_task;
 
+Node_t *schedule_array[6];
+
+void init(sem_t *s, uint32_t count_) {
+	(*s).count = count_;
+	(*s).head = NULL;
+}
+void wait(sem_t *s) {
+	__disable_irq();
+	//Why in his notes does he do s<-s-1 in page 8 week 8
+	
+	if((*s).count <= 0)
+	{
+		//Blocks that task because it is trying to access an unavailable semaphore
+		TCBS[currTask].status = task_blocked_semaphore;
+		//Removes that node from bit vector
+				for (int priority = 0; priority<6; priority++)
+		{
+			Node_t *currNode = schedule_array[priority];
+
+			printf("\t\t\t\tPriority list %d:", priority);
+
+			while (currNode != NULL)
+			{
+				printf("%d ", (*currNode).task_num);
+				currNode = (*currNode).next;
+			}
+
+			printf("\n");
+		}
+		uint8_t nodeRemoved = remove_front_node(TCBS[currTask].priority);
+		printf("==============================I HAVE REMOVED NODE: <%d> FROM BIT VECTOR", nodeRemoved);
+		//Iterates down wait list and adds new node
+		Node_t *currNode;
+
+		if ((*s).head == NULL)
+		{
+			Node_t* newNode = (Node_t*)malloc(sizeof(Node_t));
+			(*s).head = newNode;
+			printf("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&I HAVE ADDED A NEW NODE WITH taskNum <%d>\n", currTask);
+			(*((*s).head)).task_num = currTask;
+			(*((*s).head)).next = NULL;
+		}
+		else
+		{
+			currNode = (*s).head;
+
+			while ((*currNode).next != NULL)
+			{
+				currNode = (*currNode).next;
+			}
+		
+			Node_t* newNode = (Node_t*)malloc(sizeof(Node_t));
+			printf("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&I HAVE ADDED A NEW NODE WITH taskNum <%d>\n", currTask);
+			(*newNode).task_num = currTask;
+			(*newNode).next = NULL;
+			(*currNode).next = newNode;
+		}
+		
+		__enable_irq();
+		
+		//Should invoke PendSV_Handler
+		SCB->ICSR |= (1 << 28);
+	}
+	else
+	{
+		(*s).count--;
+		//printf("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&Decremented the semaphore, new val: <%d>&&&&&&&&&&&&&&&&&&&&&&&", (*s).count);
+		__enable_irq();
+	}
+}
+
+void signal(sem_t *s) {
+	__disable_irq();
+	
+	
+	if ((*s).head == NULL)//No other threads waiting, does nothing
+	{}
+	else if ((*((*s).head)).next == NULL)//Deletes first task in wait list
+	{
+		//Unblock first task in wait list
+		TCBS[(*((*s).head)).task_num].status = task_ready;
+		add_node(TCBS[(*((*s).head)).task_num].priority, (*((*s).head)).task_num);
+		printf("===================================I HAVE UNBLOCKED THREAD <%d>: %d=================", (*((*s).head)).task_num, TCBS[(*((*s).head)).task_num].status);
+		
+		//Deletes first task in wait list
+		free((*s).head);
+		(*s).head = NULL;
+	}
+	else//Deletes first task in wait list and rewires it
+	{
+		//Unblock first task in wait list
+		TCBS[(*((*s).head)).task_num].status = task_ready;
+		add_node(TCBS[(*((*s).head)).task_num].priority, (*((*s).head)).task_num);
+		
+		//Deletes first task in wait list and rewires it
+		Node_t *secondInWaitList = (*((*s).head)).next;
+		free((*s).head);
+		(*s).head = secondInWaitList;
+	}
+	
+	(*s).count++;
+	
+	__enable_irq();
+}
+
+sem_t lock;
+
 void rtosDelay(int num_timeslices)
 {
 	//Blocks current task, current task node is already removed from linked list array so just need to update its
@@ -81,13 +178,6 @@ void rtosDelay(int num_timeslices)
 	TCBS[currTask].timeslices_to_be_blocked = num_timeslices;
 	TCBS[currTask].timeslices_since_blocked = 0;
 }
-
-typedef struct Node_t{
-	uint8_t task_num;
-	struct Node_t *next;
-}Node_t;
-
-Node_t *schedule_array[6];
 
 uint32_t msTicks = 0;
 
@@ -101,10 +191,11 @@ void SysTick_Handler(void) {
 }
 
 void PendSV_Handler(void) {
-	printf("\n\n=============PENDSV===============\n\n");			
+	printf("\n\n=============PENDSV BEGIN===============\n\n");			
 	
 	printf("numTasks: %d\n", numTasks);
 	printf("createdTasks: %d\n", createdTasks);
+	printf("currTask: %d\n", currTask);
 	
 	//Increments each blocked task's timeslices_since_blocked, and checks if blocked tasks are to be made active
 	for (int i=0; i<createdTasks; i++)
@@ -123,12 +214,34 @@ void PendSV_Handler(void) {
 		}
 	}
 	
+	for (int i=0; i<createdTasks; i++)
+		printf("TASK %d STATUS: %d\n", i, TCBS[i].status);
+	
 	//Puts current task's node back if it hasnt been blocked in last timeslice
 	if (TCBS[currTask].status == task_ready)
+	{
 		add_node(TCBS[currTask].priority, currTask);
+	}
 	else
+	{
 		numTasks--;
+	}
 	
+	//==================Print out bit vector lists
+	for (int priority = 0; priority<6; priority++)
+	{
+		Node_t *currNode = schedule_array[priority];
+
+		printf("\t\t\t\tPriority list %d:", priority);
+		while (currNode != NULL)
+		{
+			printf("%d ", (*currNode).task_num);
+			currNode = (*currNode).next;
+		}
+		printf("\n");
+	}
+	printf("\n");
+	//=================================================
 
 	//add_node(TCBS[currTask].priority, currTask);
 
@@ -157,6 +270,8 @@ void PendSV_Handler(void) {
 	
 	//Reset PENDSVSET bit of ICSR to 0
 	SCB->ICSR &= !(1 << 28);
+	
+	printf("\n\n=============PENDSV END===============\n\n");		
 }
 
 //Function pointer to create task function
@@ -335,36 +450,24 @@ void initialization(void) {
 	createdTasks++;
 }
 
-uint32_t testCounter = 0;
 
 void first_task(void *args) {
 	while (1)
 	{
 		printf("\n\nTASK 1\n\n");
 		
-		for (int priority = 0; priority<6; priority++)
-		{
-			Node_t *currNode = schedule_array[priority];
-
-			printf("\t\t\t\tPriority list %d:", priority);
-
-			while (currNode != NULL)
-			{
-				printf("%d ", (*currNode).task_num);
-				currNode = (*currNode).next;
-			}
-
-			printf("\n");
-		}
-		printf("\n");
-		
 		wait(&lock);
-		while (1)
+		for (uint32_t i=0; i<1000; i++)
 		{
-			testCounter++;
-			printf("testCounter: %d\n", testCounter);
+			printf("%d ", i);
+			if (!(i%25))
+				printf("\n");
 		}
+		
 		signal(&lock);
+		
+		SCB->ICSR |= (1 << 28);
+		//===============Need to invoke PensSV because otherwise thread will hit wait very quickly after this line
 		
 		//rtosDelay(10);
 	}
@@ -374,23 +477,12 @@ void second_task(void *args) {
 	while (1)
 	{
 		printf("\n\nTASK 2\n\n");
-		for (int priority = 0; priority<6; priority++)
-		{
-			Node_t *currNode = schedule_array[priority];
-
-			printf("\t\t\t\tPriority list %d:", priority);
-			while (currNode != NULL)
-			{
-				printf("%d ", (*currNode).task_num);
-				currNode = (*currNode).next;
-			}
-			printf("\n");
-		}
-		printf("\n");
-		
+	
+		printf("&&&&&&&&&&&&&&&&&&&&&&&&Task 2 before wait, S val is now: %d\n", lock.count);
 		wait(&lock);
 		printf("This should never run\n");
 		signal(&lock);
+		printf("Task 2 after signal, S val is now: %d\n", lock.count);
 		
 		
 		//rtosDelay(3);
@@ -409,7 +501,7 @@ int main(void) {
 	rtosTaskFunc_t task2 = &second_task;
 	task_create(task2, NULL, 5);
  
-	SysTick_Config(SystemCoreClock/(1000*timeslice_frequency));
+	SysTick_Config(SystemCoreClock/(1000));
 	
 	/*
 	uint32_t period = timeslice_duration;
