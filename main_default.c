@@ -17,25 +17,6 @@ typedef uint8_t task_status;
 #define task_blocked						0
 #define task_blocked_semaphore	2//Need this to tell scheduler to disregard variables which keep track of how long delay is
 
-//Function declarations
-uint32_t storeContext(void);
-void restoreContext(uint32_t sp);
-uint8_t find_next_task();
-uint8_t remove_front_node(uint8_t priority);
-void add_node(uint8_t priority_, uint8_t taskNum);
-
-typedef struct Node_t{
-	uint8_t task_num;
-	struct Node_t *next;
-}Node_t;
-
-// Semaphore Implementation
-typedef struct{
-	uint32_t count;
-	//Wait list
-	Node_t *head;
-}sem_t;
-
 // Declare TCB 
 typedef struct{
 	//Bottom of task stack (highest address)
@@ -44,10 +25,10 @@ typedef struct{
 	uint32_t *current;
 	//Top of stack, could also be on top of pushed registers (lowest address)
 	uint32_t *stack_pointer;
-	
 	uint8_t priority;
 	task_status status;
-	
+	// Variable has been moved for priority inheritance in mutex
+	bool moved;
 	//Total number of timeslices to be blocked, >1 if rtosDelay called, 1 if rtosYield or rtosDelay(0) is called
 	uint32_t timeslices_to_be_blocked;
 	//Timeslices that have been blocked so far. Incremented in PendSV_Handler, and if >timeslices_to_be_blocked, task is blocked->activated
@@ -55,12 +36,122 @@ typedef struct{
 }tcb_t;
 
 tcb_t TCBS[6];
+
+//Function declarations
+uint32_t storeContext(void);
+void restoreContext(uint32_t sp);
+uint8_t find_next_task();
+uint8_t remove_front_node(uint8_t priority);
+uint8_t remove_specific_node(uint32_t task_to_be_removed);
+void add_node(uint8_t priority_, uint8_t taskNum);
+
+typedef struct Node_t{
+	
+	uint8_t task_num;
+	struct Node_t *next;
+}Node_t;
+
 //Created tasks is number of total tasks
 uint8_t createdTasks;
 //Numtasks is number of active tasks
 uint8_t numTasks;
 uint8_t currTask;
 uint8_t next_task;
+
+// Semaphore Implementation
+typedef struct{
+	uint32_t count;
+	//Wait list
+	Node_t *head;
+}sem_t;
+
+// Mutex Implementation
+typedef struct{
+	uint32_t count;
+	//Wait list
+	Node_t *head;
+}mutex_t;
+
+// Initialize Mutex
+void mutex_init(mutex_t *s, uint32_t count_) {
+	(*s).count = count_;
+	(*s).head = NULL;
+}
+// Mutex wait with spin lock, adding/removing from waitlist and priority inheritance
+void mutex_wait(mutex_t *s) {
+	__disable_irq();
+	while((*s).count <= 0) {
+		__enable_irq();
+		__disable_irq();
+		Node_t *currNode;
+		// If the mutex waitlist is empty
+		if ((*s).head == NULL)
+		{
+			Node_t* newNode = (Node_t*)malloc(sizeof(Node_t));
+			(*s).head = newNode;
+			printf("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&I HAVE ADDED A NEW NODE WITH taskNum <%d>\n", currTask);
+			(*((*s).head)).task_num = currTask;
+			(*((*s).head)).next = NULL;
+		}
+		else
+		{
+			currNode = (*s).head;
+			// Traverse through waitlist
+			while ((*currNode).next != NULL)
+			{
+				// If the task currently on has not been moved and it is preventing a the current higher priority task
+				if ((TCBS[(*currNode).task_num].moved == 0) && (*currNode).task_num > currTask) {\
+					// Traverse through and remove the specific task
+					remove_specific_node((*currNode).task_num);
+					// Change specific tasks priority temporarily
+					add_node(TCBS[currTask].priority, (*currNode).task_num);
+					TCBS[(*currNode).task_num].moved = 1;
+				}
+				currNode = (*currNode).next;
+			}
+			
+			// Special case to check last item in waitlist
+			if ((TCBS[(*currNode).task_num].moved == 0) && (*currNode).task_num > currTask) {
+				remove_specific_node((*currNode).task_num);
+				add_node(TCBS[currTask].priority, (*currNode).task_num);
+				TCBS[(*currNode).task_num].moved = 1;
+			}
+		
+			// Add current task to mutex waitlist
+			Node_t* newNode = (Node_t*)malloc(sizeof(Node_t));
+			printf("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&I HAVE ADDED A NEW NODE WITH taskNum <%d>\n", currTask);
+			(*newNode).task_num = currTask;
+			(*newNode).next = NULL;
+			(*currNode).next = newNode;
+		}
+	}
+	TCBS[(*((*s).head)).task_num].moved = 0;
+	
+	// Remove first node off wait list
+	if ((*((*s).head)).next == NULL)//Deletes first task in wait list
+	{
+		//Deletes first task in wait list
+		free((*s).head);
+		(*s).head = NULL;
+	}
+	else//Deletes first task in wait list and rewires it
+	{
+		//Deletes first task in wait list and rewires it
+		Node_t *secondInWaitList = (*((*s).head)).next;
+		free((*s).head);
+		(*s).head = secondInWaitList;
+	}
+	((*s).count)--;
+	__enable_irq();
+}
+
+void mutex_signal(mutex_t *s) {
+	__disable_irq();
+	((*s).count)++;
+	__enable_irq();
+}
+
+mutex_t mutex_lock;
 
 Node_t *schedule_array[6];
 
@@ -96,8 +187,8 @@ void wait(sem_t *s) {
 		printf("==============================WE OUT HERE LETS GO");
 		//Removes that node from bit vector
 		// ERROR WITH THIS ================ you are removing node currTask, but currTask doesnt exist in bit vector yet
-		// uint8_t nodeRemoved = remove_front_node(TCBS[currTask].priority);
-		// printf("==============================I HAVE REMOVED NODE: <%d> FROM BIT VECTOR", nodeRemoved);
+		uint8_t nodeRemoved = remove_front_node(TCBS[currTask].priority);
+		printf("==============================I HAVE REMOVED NODE: <%d> FROM BIT VECTOR", nodeRemoved);
 		//Iterates down wait list and adds new node
 		Node_t *currNode;
 
@@ -361,6 +452,35 @@ uint8_t remove_front_node(uint8_t priority)
 	//This was causing a bug so I commented it
   //numTasks--;
 
+  return (uint8_t)taskNumOfRemoved;
+}
+
+uint8_t remove_specific_node(uint32_t task_to_be_removed)
+{
+  uint32_t priority = TCBS[task_to_be_removed].priority;
+  uint8_t taskNumOfRemoved = 0;
+  if (priority > 5)
+    return -1;
+  if (schedule_array[priority] == NULL)
+    return 0;
+   
+  Node_t* currNode = schedule_array[priority];
+
+  if ((*currNode).task_num == task_to_be_removed) {
+    
+    task_to_be_removed = remove_front_node(priority);
+  } else {
+    
+    while ((*(*currNode).next).task_num != task_to_be_removed)
+    {
+      currNode = (*currNode).next;
+    }
+    taskNumOfRemoved = (*(*currNode).next).task_num;
+
+    Node_t* secondNode = (*(*currNode).next).next;
+    free((*currNode).next);
+    (*currNode).next = secondNode;
+  }
   return (uint8_t)taskNumOfRemoved;
 }
 
