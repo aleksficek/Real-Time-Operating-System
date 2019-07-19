@@ -58,6 +58,8 @@ uint8_t numTasks;
 uint8_t currTask;
 uint8_t next_task;
 
+Node_t *schedule_array[6];
+
 // Semaphore Implementation
 typedef struct{
 	uint32_t count;
@@ -153,7 +155,7 @@ void mutex_signal(mutex_t *s) {
 
 mutex_t mutex_lock;
 
-Node_t *schedule_array[6];
+
 
 void init(sem_t *s, uint32_t count_) {
 	(*s).count = count_;
@@ -543,7 +545,6 @@ void initialization(void) {
 		TCBS[0].current--;
 		
 		mainstack_address--;
-		
 	}
 	
 	TCBS[0].stack_pointer = TCBS[0].current + 1;
@@ -581,7 +582,7 @@ void first_task(void *args) {
 	{
 		printf("\n\nTASK 1\n\n");
 		
-		wait(&lock);
+		mutex_wait(&mutex_lock);
 		for (uint32_t i=0; i<1000; i++)
 		{
 			printf("%d ", i);
@@ -589,7 +590,7 @@ void first_task(void *args) {
 				printf("\n");
 		}
 		
-		signal(&lock);
+		mutex_signal(&mutex_lock);
 		
 		SCB->ICSR |= (1 << 28);
 		//===============Need to invoke PensSV because otherwise thread will hit wait very quickly after this line
@@ -605,7 +606,9 @@ void second_task(void *args) {
 	
 		printf("&&&&&&&&&&&&&&&&&&&&&&&&Task 2 before wait, S val is now: %d\n", lock.count);
 		wait(&lock);
-		printf("This should never run\n");
+		while(1) {
+			printf("This should never run\n");
+		}
 		signal(&lock);
 		printf("Task 2 after signal, S val is now: %d\n", lock.count);
 		
@@ -619,10 +622,10 @@ int main(void) {
 	//Initialization creates task 0
 	initialization();
 	
-	init(&lock, 1);
+	mutex_init(&mutex_lock, 1);
 	
 	rtosTaskFunc_t task1 = &first_task;
-	task_create(task1, NULL, 5);
+	task_create(task1, NULL, 3);
 	rtosTaskFunc_t task2 = &second_task;
 	task_create(task2, NULL, 5);
  
@@ -659,5 +662,4 @@ int main(void) {
 		}
 		printf("\n");
 	}
-		
 }
