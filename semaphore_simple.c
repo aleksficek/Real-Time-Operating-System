@@ -30,7 +30,7 @@ typedef struct Node_t{
 uint32_t msTicks = 0;
 void SysTick_Handler(void) {
 	// When context switch required
-	if (!(msTicks % 2000)) {
+	if (!(msTicks % 500)) {
 		// Write 1 to PENDSVSET bit of ICSR
 		SCB->ICSR |= (1 << 28);
 	}
@@ -173,36 +173,20 @@ void mutex_acquire(mutex_t *s) {
 }
 	
 void mutex_release(mutex_t *s) {
-	if (currTask == (*s).task_owner)
+	__disable_irq();
+	(*s).task_owner = 99;
+	(*s).available = true;
+	printf("=================================THE MUTEX IS NOW <AVAILABLE>=======================================\n");
+	if (TCBS[currTask].temporary_promotion)
 	{
-		__disable_irq();
-		(*s).task_owner = 99;
-		(*s).available = true;
-		printf("=================================THE MUTEX IS NOW <AVAILABLE>=======================================\n");
-		if (TCBS[currTask].temporary_promotion)
-		{
-			TCBS[currTask].temporary_promotion = false;
-			TCBS[currTask].add_in_different_priority = true;
-			__enable_irq();
-			printf("I AM EXPLICITY INVOKING PENDSV HANDLER BECAUSE I AM DONE BEING TEMPORARILY PROMOTED\n");
-			SCB->ICSR |= (1 << 28);
-		}
-		else
-			__enable_irq();
+		TCBS[currTask].temporary_promotion = false;
+		TCBS[currTask].add_in_different_priority = true;
+		__enable_irq();
+		printf("I AM EXPLICITY INVOKING PENDSV HANDLER BECAUSE I AM DONE BEING TEMPORARILY PROMOTED\n");
+		SCB->ICSR |= (1 << 28);
 	}
 	else
-	{
-		printf("=================================YOU ARE NOT THE OWNER!!!!!!!!!!!!!!!!!!!!!!!!!=======================================\n");
-		printf("=================================YOU ARE NOT THE OWNER!!!!!!!!!!!!!!!!!!!!!!!!!=======================================\n");
-		printf("=================================YOU ARE NOT THE OWNER!!!!!!!!!!!!!!!!!!!!!!!!!=======================================\n");
-		printf("=================================YOU ARE NOT THE OWNER!!!!!!!!!!!!!!!!!!!!!!!!!=======================================\n");
-		printf("=================================YOU ARE NOT THE OWNER!!!!!!!!!!!!!!!!!!!!!!!!!=======================================\n");
-		printf("=================================YOU ARE NOT THE OWNER!!!!!!!!!!!!!!!!!!!!!!!!!=======================================\n");
-		printf("=================================YOU ARE NOT THE OWNER!!!!!!!!!!!!!!!!!!!!!!!!!=======================================\n");
-		printf("=================================YOU ARE NOT THE OWNER!!!!!!!!!!!!!!!!!!!!!!!!!=======================================\n");
-		printf("=================================YOU ARE NOT THE OWNER!!!!!!!!!!!!!!!!!!!!!!!!!=======================================\n");
-		return;
-	}
+		__enable_irq();
 }
 
 void semaphore_init(sem_t *s, uint32_t count_) {
@@ -218,6 +202,7 @@ void wait(sem_t *s) {
 	if ((*s).count > 0)
 	{
 		(*s).count--;
+		printf("=====================================SEMAPHORE DECREMENTED --====================================\n");
 		__enable_irq();
 		return;
 	}
@@ -253,7 +238,7 @@ void wait(sem_t *s) {
 		
 		
 		//Invokes PendSV_Handler
-		printf("I AM EXPLICITY INVOKING PENDSV HANDLER====================================");
+		//printf("I AM EXPLICITY INVOKING PENDSV HANDLER====================================");
 		__enable_irq();
 		SCB->ICSR |= (1 << 28);
 	}
@@ -287,6 +272,7 @@ void signal(sem_t *s) {
 	}
 	
 	(*s).count++;
+	printf("=====================================SEMAPHORE INCREMENTED ++====================================\n");
 	
 	__enable_irq();
 	
@@ -304,6 +290,8 @@ void rtosDelay(int num_timeslices)
 	TCBS[currTask].status = task_blocked;
 	TCBS[currTask].timeslices_to_be_blocked = num_timeslices;
 	TCBS[currTask].timeslices_since_blocked = 0;
+	
+	SCB->ICSR |= (1 << 28);
 }
 
 void PendSV_Handler(void) {
@@ -565,17 +553,17 @@ void initialization(void) {
 void first_task(void *args) {
 	while (1)
 	{
+		printf("=====================================Task 1 attempts to decrement-- semaphore====================================\n");
 		wait(&lock1);
-		printf("=========================================FIRST TASK IS NOW RUNNING===============================================\n");
-		mutex_acquire(&mutex_lock);
-		
-		uint32_t i = 0;
-		while(1)
+		for (int i=0; i<30; i++)
 		{
-			printf("%d", currTask);
-			if (!(i%100))
-				printf("\n");
-			i++;
+			printf("TASK 1: PROTECTED BY SEMAPHORE %d\n", lock1.count);
+		}
+		printf("=====================================Task 1 increments++ semaphore====================================\n");
+		signal(&lock1);
+		for (int i=0; i<30; i++)
+		{
+			printf("TASK 1: UNPROTECTED %d\n", lock1.count);
 		}
 	}
 }
@@ -583,17 +571,18 @@ void first_task(void *args) {
 void second_task(void *args) {
 	while (1)
 	{
-		mutex_acquire(&mutex_lock);
-		printf("======================================TASK 2: I HAVE ACQUIRED THE MUTEX======================================\n");
-		signal(&lock1);
-		for (uint32_t i=0; i<2500; i++)
+		printf("=====================================Task 2 attempts to decrement-- semaphore====================================\n");
+		wait(&lock1);
+		for (int i=0; i<30; i++)
 		{
-			printf("%d", currTask);
-			if (!(i%100))
-				printf("\n");
+			printf("TASK 2: PROTECTED BY SEMAPHORE %d\n", lock1.count);
 		}
-		printf("======================================TASK 2: I HAVE RELEASED THE MUTEX======================================\n");
-		mutex_release(&mutex_lock);
+		printf("=====================================Task 2 increments++ semaphore====================================\n");
+		signal(&lock1);
+		for (int i=0; i<30; i++)
+		{
+			printf("TASK 2: UNPROTECTED %d\n", lock1.count);
+		}
 	}
 }
 
@@ -604,34 +593,21 @@ int main(void) {
 	printf("  \___ \| |  | | |      / /\ \ |  _  /  | |  \___ \  |  _  /  | | | |  | |\___ \ \n");
 	printf("  ____) | |__| | |____ / ____ \| | \ \ _| |_ ____) | | | \ \  | | | |__| |____) |\n");
 	printf(" |_____/ \____/|______/_/    \_\_|  \_\_____|_____/  |_|  \_\ |_|  \____/|_____/ \n");
+	
+	semaphore_init(&lock1, 1);
 
 	//Initialization creates task 0
 	initialization();
 	
-	mutex_init(&mutex_lock, 1);
-	semaphore_init(&lock1, 0);
-	
 	rtosTaskFunc_t task1 = &first_task;
-	task_create(task1, NULL, 5);
+	task_create(task1, NULL, 3);
 	rtosTaskFunc_t task2 = &second_task;
-	task_create(task2, NULL, 1);
- 
+	task_create(task2, NULL, 3);
+	
 	SysTick_Config(SystemCoreClock/(1000));
 	
-	while(true) {
-		printf("\n\n=========================================TASK 0, IDLE TASK====================================\n\n");
-		for (int priority = 0; priority<6; priority++)
-		{
-			Node_t *currNode = schedule_array[priority];
-			printf("\t\t\t\tPriority list %d:", priority);
-			
-			while (currNode != NULL)
-			{
-				printf("%d ", (*currNode).task_num);
-				currNode = (*currNode).next;
-			}
-			printf("\n");
-		}
-		printf("\n");
+	while(1) 
+	{
+		printf("TASK 0 (IDLE)\n");
 	}
 }
