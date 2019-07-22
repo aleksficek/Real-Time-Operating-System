@@ -1,7 +1,3 @@
-/*
- * Default main.c for rtos lab.
- * @author Andrew Morton, 2018
- */
 #include <LPC17xx.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -24,10 +20,22 @@ uint8_t find_next_task();
 uint8_t remove_front_node(uint8_t priority);
 void add_node(uint8_t priority_, uint8_t taskNum);
 
+// Node data structure
 typedef struct Node_t{
 	uint8_t task_num;
 	struct Node_t *next;
 }Node_t;
+
+// System clock and pre-empt
+uint32_t msTicks = 0;
+void SysTick_Handler(void) {
+	// When context switch required
+	if (!(msTicks % 2000)) {
+		// Write 1 to PENDSVSET bit of ICSR
+		SCB->ICSR |= (1 << 28);
+	}
+	msTicks++;
+}
 
 // Semaphore struct
 typedef struct{
@@ -123,7 +131,6 @@ void mutex_acquire(mutex_t *s) {
 					target = (*target).next;
 					beforeTarget = (*beforeTarget).next;
 				}
-
 				if ((*target).next == NULL)//If target is at end of linked list
 				{
 					printf("1\n");
@@ -136,7 +143,6 @@ void mutex_acquire(mutex_t *s) {
 					(*beforeTarget).next = afterTarget;
 				}
 			}
-			
 			if (schedule_array[TCBS[currTask].priority] == NULL)//Case 1, empty list, won't happen
 			{
 				schedule_array[TCBS[currTask].priority] = target;
@@ -152,8 +158,6 @@ void mutex_acquire(mutex_t *s) {
 			//Set new priority and promotion flag
 			TCBS[(*s).task_owner].temporary_promotion = true;
 			TCBS[(*s).task_owner].priority = TCBS[currTask].priority;
-			
-			//SCB->ICSR |= (1 << 28);
 		}
 		
 		__enable_irq();
@@ -183,9 +187,6 @@ void mutex_release(mutex_t *s) {
 	}
 	else
 		__enable_irq();
-	
-	//printf("I AM EXPLICITY INVOKING PENDSV HANDLER====================================");
-	//SCB->ICSR |= (1 << 28);
 }
 
 void semaphore_init(sem_t *s, uint32_t count_) {
@@ -284,28 +285,13 @@ void rtosDelay(int num_timeslices)
 {
 	//Blocks current task, current task node is already removed from linked list array so just need to update its
 	//status, and the next PendSV_Handler will handle everything
-	
 	TCBS[currTask].status = task_blocked;
 	TCBS[currTask].timeslices_to_be_blocked = num_timeslices;
 	TCBS[currTask].timeslices_since_blocked = 0;
-	
-	//Maybe need to invoke PendSV_Handler
-}
-
-uint32_t msTicks = 0;
-
-void SysTick_Handler(void) {
-	// When context switch required
-	if (!(msTicks % 2000)) {
-		// Write 1 to PENDSVSET bit of ICSR
-		SCB->ICSR |= (1 << 28);
-	}
-	msTicks++;
 }
 
 void PendSV_Handler(void) {
 	printf("\n\n=============PENDSV BEGIN===============\n\n");			
-	
 	printf("numTasks: %d\n", numTasks);
 	printf("createdTasks: %d\n", createdTasks);
 	printf("currTask: %d\n", currTask);
@@ -316,7 +302,6 @@ void PendSV_Handler(void) {
 		if (TCBS[i].status == task_blocked)
 		{
 			TCBS[i].timeslices_since_blocked++;
-			
 			if (TCBS[i].timeslices_since_blocked > TCBS[i].timeslices_to_be_blocked)
 			{
 				add_node(TCBS[i].priority, i);
@@ -343,9 +328,7 @@ void PendSV_Handler(void) {
 			add_node(TCBS[currTask].priority, currTask);
 	}
 	else
-	{
 		printf("I have blocked task <%d>\n", currTask);
-	}
 	
 	//==================Print out bit vector lists
 	for (int priority = 0; priority<6; priority++)
@@ -363,18 +346,10 @@ void PendSV_Handler(void) {
 	printf("\n");
 	//=================================================
 
-	//add_node(TCBS[currTask].priority, currTask);
-
 	//Finds next task
 	next_task = find_next_task();
 	
-							// Some way of choosing next Task			
-							// Assume we start we TCB0
-							// Access Registers 4 to 11 and push onto TCB1s stack
-	
-	// Just push/pop R4-R11 to/from stack and manipulate the stack pointer
-	
-	//Pushes register contents onto current task's stack and updates its stack pointer																																												// LOTS OF QUESTIONS HERE, CLARIFY
+	//Pushes register contents onto current task's stack and updates its stack pointer
 	TCBS[currTask].stack_pointer = (uint32_t *)storeContext();
 
 	//Pops new task's registers content (stored on its stack) into registers
@@ -385,12 +360,10 @@ void PendSV_Handler(void) {
 	currTask = next_task;
 	printf("next task: %d\n", currTask);
 	
-	
 	//Decreases semaphore if unblocked after waiting for semaphore to be available
 	if (TCBS[currTask].when_unblocked_decrease_semaphore != NULL)
 	{
 		(*TCBS[currTask].when_unblocked_decrease_semaphore).count--;
-		//printf(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;SPECIAL CASE IN PENDSV, NOW <%d>;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n", lock.count);
 		TCBS[currTask].when_unblocked_decrease_semaphore = NULL;
 	}
 	
@@ -417,23 +390,19 @@ void add_node(uint8_t priority_, uint8_t taskNum)
     Node_t* newNode = (Node_t*)malloc(sizeof(Node_t));
     (*newNode).task_num = taskNum;
     (*newNode).next = NULL;
-
 		schedule_array[priority_] = newNode;
 	}
 	//Case 2: if not empty
   else
   {
+		//Get to last node
     while ((*currNode).next != NULL)
-    {
       currNode = (*currNode).next;
-    }
-    //Now at last node
     
     //Set last node pointer to pointer of new node, and set its members
     Node_t* newNode = (Node_t*)malloc(sizeof(Node_t));
     (*newNode).task_num = taskNum;
     (*newNode).next = NULL;
-
     (*currNode).next = newNode;
   }
 }
@@ -464,8 +433,7 @@ void task_create(rtosTaskFunc_t taskFunction, void *R0, uint8_t priority_)
 	createdTasks++;
 }
 
-//Returns task number of task removed, 0 if no ready tasks at priority, 
-//-1 if invalid priority
+//Returns task number of task removed, 0 if no ready tasks at priority, -1 if invalid priority
 uint8_t remove_front_node(uint8_t priority)
 {
   uint8_t taskNumOfRemoved = 0;
@@ -481,9 +449,6 @@ uint8_t remove_front_node(uint8_t priority)
   Node_t* secondNode = (*schedule_array[priority]).next;
   free(schedule_array[priority]);
   schedule_array[priority] = secondNode;
-
-	//This was causing a bug so I commented it
-  //numTasks--;
 
   return (uint8_t)taskNumOfRemoved;
 }
@@ -512,10 +477,8 @@ uint8_t find_next_task()
 }
 
 void initialization(void) {
-	// Initialize TCB base address for its stack
-	
+
 	// Find address of main stack (first 32 bit value at 0x0 is base address)
-	// Then go up for tcbs 54321 but substract instead (subtract by 2 kib, then 1 kib (800, then 400)
 	uint32_t **mainstack = 0x0;
 	//This used to copy over main stack to task 1 stack
 	uint32_t *mainstack_address = *mainstack;
@@ -545,7 +508,6 @@ void initialization(void) {
 	
 	// Copy the main stack contents to process stack of new main() task and set the MSP to the main stack base address
 	// Loop through each item and then save to next stack from mainstack_address - 0x8000
-	
 	uint32_t *MSP = (uint32_t *)__get_MSP();
 	TCBS[0].current = TCBS[0].base;
 	
@@ -553,9 +515,7 @@ void initialization(void) {
 	while (mainstack_address >= MSP) {
 		*TCBS[0].current = *mainstack_address;
 		TCBS[0].current--;
-		
 		mainstack_address--;
-		
 	}
 	
 	TCBS[0].stack_pointer = TCBS[0].current + 1;
@@ -567,11 +527,9 @@ void initialization(void) {
 	__set_CONTROL(__get_CONTROL() | (1 << 1));
 	
 	//Set PSP to top of task 1 stack
-	// TCB1.current may have decremented 1 too much
 	__set_PSP((uint32_t)TCBS[0].stack_pointer);
 	
-	//Begin multithread by running task 0. Correct next task will be 
-	//determined at next pre-empt in PendSV_Handler
+	//Begin multithread by running task 0. Correct next task will be determined at next pre-empt
 	currTask = 0;
 	
 	//Set task 1 priority to 0, acts as idle task
@@ -602,8 +560,6 @@ void first_task(void *args) {
 		}
 		mutex_release(&mutex_lock);
 		signal(&lock1);
-		
-		//rtosDelay(10);
 	}
 }
 
@@ -621,8 +577,6 @@ void second_task(void *args) {
 		}
 		printf("======================================TASK 2: I HAVE RELEASED THE MUTEX======================================\n");
 		mutex_release(&mutex_lock);
-		
-		//rtosDelay(3);
 	}
 }
 
@@ -647,27 +601,13 @@ int main(void) {
  
 	SysTick_Config(SystemCoreClock/(1000));
 	
-	/*
-	uint32_t period = timeslice_duration;
-	uint32_t prev = -period;
-	*/
-	
 	while(true) {
-		/*
-		if((uint32_t)(msTicks - prev) >= period) {
-			printf("\nTASK 0\n");
-			prev += period;
-		}
-		*/
-		
 		printf("\n\n=========================================TASK 0, IDLE TASK====================================\n\n");
-
 		for (int priority = 0; priority<6; priority++)
 		{
 			Node_t *currNode = schedule_array[priority];
-
 			printf("\t\t\t\tPriority list %d:", priority);
-
+			
 			while (currNode != NULL)
 			{
 				printf("%d ", (*currNode).task_num);
