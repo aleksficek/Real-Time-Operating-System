@@ -170,15 +170,19 @@ void mutex_acquire(mutex_t *s) {
 	
 void mutex_release(mutex_t *s) {
 	__disable_irq();
+	(*s).task_owner = 99;
+	(*s).available = true;
+	printf("=================================THE MUTEX IS NOW <AVAILABLE>=======================================\n");
 	if (TCBS[currTask].temporary_promotion)
 	{
 		TCBS[currTask].temporary_promotion = false;
 		TCBS[currTask].add_in_different_priority = true;
+		__enable_irq();
+		printf("I AM EXPLICITY INVOKING PENDSV HANDLER BECAUSE I AM DONE BEING TEMPORARILY PROMOTED\n");
+		SCB->ICSR |= (1 << 28);
 	}
-	(*s).task_owner = 99;
-	(*s).available = true;
-	printf("=================================THE MUTEX IS NOW <AVAILABLE>=======================================\n");
-	__enable_irq();
+	else
+		__enable_irq();
 	
 	//printf("I AM EXPLICITY INVOKING PENDSV HANDLER====================================");
 	//SCB->ICSR |= (1 << 28);
@@ -390,8 +394,6 @@ void PendSV_Handler(void) {
 		TCBS[currTask].when_unblocked_decrease_semaphore = NULL;
 	}
 	
-	
-
 	//Removes next task's node
 	remove_front_node(TCBS[next_task].priority);
 	
@@ -589,7 +591,8 @@ void initialization(void) {
 void first_task(void *args) {
 	while (1)
 	{
-
+		wait(&lock1);
+		printf("=========================================FIRST TASK IS NOW RUNNING===============================================\n");
 		mutex_acquire(&mutex_lock);
 		for (uint32_t i=0; i<1000; i++)
 		{
@@ -598,13 +601,7 @@ void first_task(void *args) {
 				printf("\n");
 		}
 		mutex_release(&mutex_lock);
-		
-		for (uint32_t i=0; i<1000; i++)
-		{
-			printf("%da", currTask);
-			if (!(i%100))
-				printf("\n");
-		}
+		signal(&lock1);
 		
 		//rtosDelay(10);
 	}
@@ -614,20 +611,16 @@ void second_task(void *args) {
 	while (1)
 	{
 		mutex_acquire(&mutex_lock);
+		printf("======================================TASK 2: I HAVE ACQUIRED THE MUTEX======================================\n");
+		signal(&lock1);
 		for (uint32_t i=0; i<1000; i++)
 		{
 			printf("%d", currTask);
 			if (!(i%100))
 				printf("\n");
 		}
+		printf("======================================TASK 2: I HAVE RELEASED THE MUTEX======================================\n");
 		mutex_release(&mutex_lock);
-		
-		for (uint32_t i=0; i<1000; i++)
-		{
-			printf("%da", currTask);
-			if (!(i%100))
-				printf("\n");
-		}
 		
 		//rtosDelay(3);
 	}
@@ -650,7 +643,7 @@ int main(void) {
 	rtosTaskFunc_t task1 = &first_task;
 	task_create(task1, NULL, 5);
 	rtosTaskFunc_t task2 = &second_task;
-	task_create(task2, NULL, 5);
+	task_create(task2, NULL, 1);
  
 	SysTick_Config(SystemCoreClock/(1000));
 	
@@ -680,10 +673,8 @@ int main(void) {
 				printf("%d ", (*currNode).task_num);
 				currNode = (*currNode).next;
 			}
-
 			printf("\n");
 		}
 		printf("\n");
 	}
-		
 }
